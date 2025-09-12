@@ -41,17 +41,21 @@ impl<I2C, D, const N: usize> Bmi2<I2cInterface<I2C>, D, N> {
     }
 }
 
-impl<SPI, D, const N: usize> Bmi2<SpiInterface<SPI>, D, N>
+impl<SPI, D, CommE, const N: usize> Bmi2<SpiInterface<SPI>, D, N>
 where
+    SPI: embedded_hal::spi::SpiDevice<Error = CommE>,
     D: DelayNs,
 {
     /// Create a new Bmi270 device with SPI communication.
     pub fn new_spi(spi: SPI, delay: D, burst: Burst) -> Self {
-        Bmi2 {
+        let mut bmi2 = Bmi2 {
             iface: SpiInterface { spi },
             max_burst: burst.val(),
             delay,
-        }
+        };
+        let _ = bmi2.get_chip_id();
+        bmi2.delay.delay_us(450);
+        bmi2
     }
 
     /// Release I2C and CS.
@@ -735,6 +739,9 @@ where
         // Reset Chip, mandatory per datasheet
         self.send_cmd(Cmd::SoftReset)?;
         self.delay.delay_us(2000);
+
+        let _ = self.get_chip_id();
+        self.delay.delay_us(450);
 
         // Disable advanced power mode
         self.disable_power_save()?;

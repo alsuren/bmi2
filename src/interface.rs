@@ -37,15 +37,12 @@ where
 {
     type Error = Error<CommE>;
     fn write(&mut self, payload: &mut [u8]) -> Result<(), Self::Error> {
-        payload[0] += 0x80;
-
         // `write` asserts and deasserts CS for us. No need to do it manually!
-
         self.spi.write(payload).map_err(Error::Comm)
     }
 
     fn write_reg(&mut self, register: u8, data: u8) -> Result<(), Self::Error> {
-        let payload: [u8; 2] = [register + 0x80, data];
+        let payload: [u8; 2] = [register, data];
 
         // `write` asserts and deasserts CS for us. No need to do it manually!
 
@@ -87,13 +84,13 @@ where
     }
 
     fn read_reg(&mut self, register: u8) -> Result<u8, Self::Error> {
-        let mut payload = [register, 0];
+        let mut payload = [register + 0x80, 0, 0];
 
         // `read` asserts and deasserts CS for us. No need to do it manually!
-        let res = self.spi.read(&mut payload).map_err(Error::Comm);
+        let res = self.spi.transfer_in_place(&mut payload).map_err(Error::Comm);
 
         match res {
-            Ok(_) => Ok(payload[1]),
+            Ok(_) => Ok(payload[2]),
             Err(e) => Err(e),
         }
     }
