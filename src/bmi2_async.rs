@@ -1,4 +1,4 @@
-use embedded_hal::delay::DelayNs;
+use embedded_hal_async::delay::DelayNs;
 use fixedvec::FixedVec;
 
 use crate::registers::Registers;
@@ -41,17 +41,21 @@ impl<I2C, D, const N: usize> Bmi2<I2cInterface<I2C>, D, N> {
     }
 }
 
-impl<SPI, D, const N: usize> Bmi2<SpiInterface<SPI>, D, N>
+impl<SPI, D, CommE, const N: usize> Bmi2<SpiInterface<SPI>, D, N>
 where
+    SPI: embedded_hal_async::spi::SpiDevice<Error = CommE>,
     D: DelayNs,
 {
     /// Create a new Bmi270 device with SPI communication.
-    pub fn new_spi(spi: SPI, delay: D, burst: Burst) -> Self {
-        Bmi2 {
+    pub async fn new_spi(spi: SPI, delay: D, burst: Burst) -> Self {
+        let mut bmi2 = Bmi2 {
             iface: SpiInterface { spi },
             max_burst: burst.val(),
             delay,
-        }
+        };
+        let _ = bmi2.get_chip_id().await;
+        bmi2.delay.delay_us(450).await;
+        bmi2
     }
 
     /// Release I2C and CS.
@@ -63,7 +67,7 @@ where
 impl<I, D, CommE, const N: usize> Bmi2<I, D, N>
 where
     I: ReadData<Error = Error<CommE>> + WriteData<Error = Error<CommE>>,
-    D: embedded_hal::delay::DelayNs, // Add constraint for D
+    D: DelayNs, // Add constraint for D
 {
     /// Get the chip id.
     pub async fn get_chip_id(&mut self) -> Result<u8, Error<CommE>> {
@@ -744,7 +748,7 @@ where
         pwr_conf.power_save = false;
         self.set_pwr_conf(pwr_conf).await?;
         // Critical delay after disabling power save
-        self.delay.delay_us(450);
+        self.delay.delay_us(450).await;
         Ok(())
     }
 
@@ -754,7 +758,7 @@ where
         pwr_conf.power_save = true;
         self.set_pwr_conf(pwr_conf).await?;
         // Critical delay after enabling power save
-        self.delay.delay_us(450);
+        self.delay.delay_us(450).await;
         Ok(())
     }
 
@@ -768,7 +772,10 @@ where
 
         // Reset Chip, mandatory per datasheet
         self.send_cmd(Cmd::SoftReset).await?;
-        self.delay.delay_us(2000);
+        self.delay.delay_us(2000).await;
+
+        let _ = self.get_chip_id().await?;
+        self.delay.delay_us(450).await;
 
         // Disable advanced power mode
         self.disable_power_save().await?;
@@ -792,7 +799,7 @@ where
 
         let init_ctrl = self.get_init_ctrl().await?;
         self.set_init_ctrl(init_ctrl & 0b1111_1110).await?;
-        self.delay.delay_us(450);
+        self.delay.delay_us(450).await;
 
         while offset < max_len {
             // INIT_ADDR should point to 16-bit words
@@ -822,17 +829,17 @@ where
             self.iface.write(vec.as_mut_slice()).await?;
 
             offset += chunk_size;
-            self.delay.delay_us(2);
+            self.delay.delay_us(2).await;
         }
 
         // This operation must not be performed more than once after POR or soft reset.
         self.set_init_ctrl(1).await?;
-        self.delay.delay_us(2);
+        self.delay.delay_us(2).await;
 
         self.enable_power_save().await?;
 
         // Initialization takes at most 20ms per datasheet
-        self.delay.delay_us(20_000);
+        self.delay.delay_us(20_000).await;
 
         let internal_status = self.iface.read_reg(Registers::INTERNAL_STATUS).await?;
 
