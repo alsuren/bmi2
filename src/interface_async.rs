@@ -1,6 +1,7 @@
 pub use crate::interface_common::{I2cAddr, I2cInterface, SpiInterface};
 
 use crate::types::Error;
+use embedded_hal::spi::Operation;
 use embedded_hal_async::i2c::I2c;
 use embedded_hal_async::spi::SpiDevice;
 
@@ -86,10 +87,21 @@ where
 {
     type Error = Error<CommE>;
     async fn read(&mut self, payload: &mut [u8]) -> Result<(), Self::Error> {
-        // `read` asserts and deasserts CS for us. No need to do it manually!
-        let res = self.spi.read(payload).await.map_err(Error::Comm);
+        if payload.is_empty() {
+            return Ok(());
+        }
+        let addr = payload[0] | 0x80;
+        let mut dummy = [0u8; 1];
 
-        res?;
+        self.spi
+            .transaction(&mut [
+                Operation::Write(&[addr]),          // send address with R bit
+                Operation::Read(&mut dummy),        // consume 1 dummy byte
+                Operation::Read(&mut payload[1..]), // read real data directly into caller buffer
+            ])
+            .await
+            .map_err(Error::Comm)?;
+
         Ok(())
     }
 
